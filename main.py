@@ -1,411 +1,109 @@
 import os
+import sys
 import threading
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import requests
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
-# Dummy HTTP Server for Render
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is Live!")
+# Base64 encoded robust script execution (Prevents mobile paste indentation issues)
+ENCODED_SCRIPT = """
+aW1wb3J0IG9zCmltcG9ydCB0aHJlYWRpbmcKaW1wb3J0IHJlcXVlc3RzCmZyb20gaHR0cC5zZXJ2
+ZXIgaW1wb3J0IEhUVFBTZXJ2ZXIsIEJhc2VIVFRQUmVxdWVzdEhhbmRsZXIKZnJvbSBweXJvZ3Jh
+bSBpbXBvcnQgQ2xpZW50LCBmaWx0ZXJzCmZyb20gcHlyb2dyYW0udHlwZXMgaW1wb3J0IElubGlu
+ZUtleWJvYXJkTWFya3VwLCBJbmxpbmVLZXlib2FyZEJ1dHRvbiwgQ2FsbGJhY2tRdWVyeQoKY2xh
+c3MgU2ltcGxlSFRUUFJlcXVlc3RIYW5kbGVyKEJhc2VIVFRQUmVxdWVzdEhhbmRsZXIpOgogICAg
+ZGVmIGRvX0dFVChzZWxmKToKICAgICAgICBzZWxmLnNlbmRfcmVzcG9uc2UoMjAwKQogICAgICAg
+IHNlbGYuZW5kX2hlYWRlcnMoKQogICAgICAgIHNlbGYud2ZpbGUud3JpdGUoYiJCb3QgaXMgTGl2
+ZSEiKQoKZGVmIHJ1bl9odHRwX3NlcnZlcigpOgogICAgcG9ydCA9IGludChvcy5lbnZpcm9uLmdl
+dCgiUE9SVCIsIDgwODApKQogICAgc2VydmVyID0gSFRUUFNlcnZlcigoJzAuMC4wLjAnLCBwb3J0
+KSwgU2ltcGxlSFRUUFJlcXVlc3RIYW5kbGVyKQogICAgc2VydmVyLnNlcnZlX2ZvcmV2ZXIoKQoK
+QVBJX0lEID0gNgpBUElfSEFTSCA9ICJlYjA2NjM1N2JlMjM0ZDEwODk5ODY0N2I3ZjczZDNkNiIK
+Qk9UX1RPS0VOID0gb3MuZW52aXJvbi5nZXQoIkJPVF9UT0tFTiIsICI4NjUzODE1MTE3OkFBSGFo
+R1lNdWI0bW1FVVUxYXdNZ214TDJUUW9iWWNqTDZzIikKQURNSU5fSUQgPSBpbnQob3MuZW52aXJv
+bi5nZXQoIkFETUlOX0lEIiwgIjc5OTI2NDg5OTciKSkKCkFQUFhfQkFTRV9VUkwgPSAiaHR0cHM6
+Ly9hcGkuYXBweC5jby5pbiIKQVBQWF9BVVRIX1RPS0VOID0gIiIKCmFwcCA9IENsaWVudCgiYXV0
+b19iYXRjaF9ib3QiLCBhcGlfaWQ9QVBJX0lELCBhcGlfaGFzaD1BUElfSEFTSCwgYm90X3Rva2Vu
+PUJPVF9UT0tFTikKCmRlZiBnZXRfaGVhZGVycygpOgogICAgcmV0dXJuIHsiVXNlci1BZ2VudCI6
+ICJNb3ppbGxhLzUuMCAoTGludXg7IEFuZHJvaWQgMTApIiwgIkF1dGhvcml6YXRpb24iOiBmIkJl
+YXJlciB7QVBQWF9BVVRIX1RPS0VOfSIsICJDbGllbnQtU2VydmljZSI6ICJBcHB4IiwgIkNvbnRl
+bnQtVHlwZSI6ICJhcHBsaWNhdGlvbi9qc29uIn0KCmRlZiBpc19hZG1pbih1c2VyX2lkKToKICAg
+IHJldHVybiB1c2VyX2lkID09IEFETUlOX0lDCgpAYXBwLm9uX21lc3NhZ2UoZmlsdGVycy5jb21t
+YW5kKCJzZXR0b2tlbiIpICYgZmlsdGVycy5wcml2YXRlKQphc3luYyBkZWYgc2V0X3Rva2VuKGNs
+aWVudCwgbWVzc2FnZSk6CiAgICBnbG9iYWwgQVBQWF9BVVRIX1RPS0VOCiAgICBpZiBub3QgaXNf
+YWRtaW4obWVzc2FnZS5mcm9tX3VzZXIuaWQpOgogICAgICAgIHJldHVybgogICAgaWYgbGVuKG1l
+c3NhZ2UuY29tbWFuZCkgPCAyOgogICAgICAgIGF3YWl0IG1lc3NhZ2UucmVwbHlfdGV4dCgi44Ka
+ICoqVXNhZ2U6KiogYC9zZXR0b2tlbiA8WU9VS19BVVRIX1RPS0VOPmAiKQogICAgICAgIHJldHVy
+bgogICAgQVBQWF9BVVRIX1RPS0VOID0gbWVzc2FnZS5jb21tYW5kWzFdCiAgICBhd2FpdCBtZXNz
+YWdlLnJlcGx5X3RleHQoIuKchCAqKkF1dGggVG9rZW4gU3VjY2Vzc2Z1bGx5IFNldCEqKlxuXG5B
+YiBgL3N0YXJ0YCBiaGVqa2FyIGFwbmUgcHVyY2hhc2VkIGJhdGNoZXMgZGVraGVpbi4iKQoKQGFw
+cC5vbl9tZXNzYWdlKGZpbHRlcnMuY29tbWFuZCgic3RhcnQiKSAmIGZpbHRlcnMucHJpdmF0ZSkK
+YXN5bmMgZGVmIHN0YXJ0X2NtZChjbGllbnQsIG1lc3NhZ2UpOgogICAgZ2xvYmFsIEFQUFhfQVVU
+SF9UT0tFTgogICAgaWYgbm90IGlzX2FkbWluKG1lc3NhZ2UuZnJvbV91c2VyLmlkKToKICAgICAg
+ICByZXR1cm4KCiAgICBpZiBub3QgQVBQWF9BVVRIX1RPS0VOOgogICAgICAgIGF3YWl0IG1lc3Nh
+Z2UucmVwbHlfdGV4dCgi4p2DIFRva2VuIHNldCBuYWhpIGhhaSEgUGVobGUgYC9zZXR0b2tlbiA8
+dG9rZW4+YCBzZSB0b2tlbiBlbnRlciBrYXJlaW4uIikKICAgICAgICByZXR1cm4KCiAgICBtc2cg
+PSBhd2FpdCBtZXNzYWdlLnJlcGx5X3RleHQoIuKMsCAqKkFhcGtlIHB1cmNoYXNlZCBiYXRjaGVz
+IGZldGNoIGhvIHJhaGUgaGFpbi4uLioqIikKCiAgICB0cnk6CiAgICAgICAgdXJsID0gZiJ7QVBQ
+WF9CQVNFX1VSTH0vZ2V0LW15LWNvdXJzZXMiCiAgICAgICAgcmVzcCA9IHJlcXVlc3RzLmdldCh1
+cmwsIGhlYWRlcnM9Z2V0X2hlYWRlcnMoKSkKCiAgICAgICAgaWYgcmVzcC5zdGF0dXNfY29kZSAh
+PSAyMDA6CiAgICAgICAgICAgIGF3YWl0IG1zZy5lZGl0X3RleHQoZiLinaAgQVBJIEVycm9yOiB7
+cmVzcC5zdGF0dXNfY29kZX0uIFRva2VuIGV4cGlyZSBobyBnYXlhIGhhaSB5YSBnYWxhdCBoYWku
+IikKICAgICAgICAgICAgcmV0dXJuCgogICAgICAgIGNvdXJzZXMgPSByZXNwLmpzb24oKS5nZXQo
+ImRhdGEiLCBbXSkKCiAgICAgICAgaWYgbm90IGNvdXJzZXM6CiAgICAgICAgICAgIGF3YWl0IG1z
+Zy5lZGl0X3RleHQoIuOCmSBJcyBhY2NvdW50IG1lIGtvaSBhY3RpdmUvcHVyY2hhc2VkIGJhdGNo
+IG5haGkgbWlsYS4iKQogICAgICAgICAgICByZXR1cm4KCiAgICAgICAgYnV0dG9ucyA9IFtdCiAg
+ICAgICAgZm9yIGNvdXJzZSBpbiBjb3Vyc2VzOgogICAgICAgICAgICBja19uYW1lID0gY291cnNl
+LmdldCgidGl0bGUiLCAiVW5rbm93biBCYXRjaCIpCiAgICAgICAgICAgIGNrX2lkID0gY291cnNl
+LmdldCgiaWQiKQogICAgICAgICAgICBidXR0b25zLmFwcGVuZChbSW5saW5lS2V5Ym9hcmRCdXR0
+b24oZiLinaAge2NrX25hbWV9IiwgY2FsbGJhY2tfZGF0YT1mInR4dF97Y2tfaWR9IildKQoKICAg
+ICAgICByZXBseV9tYXJrdXAgPSBJbmxpbmVLZXlib2FyZE1hcmt1cChidXR0b25zKQogICAgICAg
+IGF3YWl0IG1zZy5lZGl0X3RleHQoIvCfkYcgKipBYXBrZSBQdXJjaGFzZWQgQmF0Y2hlczoqKlxu
+SmlzIGJhdGNoIGtpIFRYVCBmaWxlIGNoYWhpeWUsIHVzIGJ1dHRvbiBwYXIgY2xpY2sga2FyZWlu
+OiIsIHJlcGx5X21hcmt1cD1yZXBseV9tYXJrdXApCgogICAgZXhjZXB0IEV4Y2VwdGlvbiBhcyBl
+OgogICAgICAgIGF3YWl0IG1zZy5lZGl0X3RleHQoZiLinaAgRXJyb3I6IGB7c3RyKGUpfWAiKQoK
+ZGVmIGV4dHJhY3RfdXBsb2FkZXJfdHh0KGZvbGRlcl9pZCk6CiAgICB0eHRfbGluZXMgPSBbXQog
+ICAgdXJsID0gZiJ7QVBQWF9CQVNFX1VSTH0vZ2V0LWNvbnRlbnRzP2ZvbGRlcl9pZD17Zm9sZGVy
+X2lkfSIKICAgIHJlc3AgPSByZXF1ZXN0cy5nZXQodXJsLCBoZWFkZXJzPWdldF9oZWFkZXJzKCkp
+CgogICAgaWYgcmVzcC5zdGF0dXNfY29kZSAhPSAyMDA6CiAgICAgICAgcmV0dXJuIHR4dF9saW5l
+cwoKICAgIGl0ZW1zID0gcmVzcC5qc29uKCkuZ2V0KCJkYXRhIiwgW10pCgogICAgZm9yIGl0ZW0g
+aW4gaXRlbXM6CiAgICAgICAgaXRlbV90eXBlID0gaXRlbS5nZXQoInR5cGUiKQogICAgICAgIHRp
+dGxlID0gaXRlbS5nZXQoInRpdGxlIiwgIlVudGl0bGVkIikucmVwbGFjZSgiOiIsICIgLSAiKS5y
+ZXBsYWNlKCIvIiwgIi0iKS5zdHJpcCgpCgogICAgICAgIGlmIGl0ZW1fdHlwZSA9PSAiZm9sZGVy
+IjoKICAgICAgICAgICAgc3ViX2lkID0gaXRlbS5nZXQoImlkIikKICAgICAgICAgICAgdHh0X2xp
+bmVzLmV4dGVuZChleHRyYWN0X3VwbG9hZGVyX3R4dChzdWJfaWQpKQoKICAgICAgICBlbGlmIGl0
+ZW1fdHlwZSA9PSAicGRmIjoKICAgICAgICAgICAgZmlsZV91cmwgPSBpdGVtLmdldCgiZmlsZV91
+cmwiKQogICAgICAgICAgICBpZiBmaWxlX3VybDoKICAgICAgICAgICAgICAgIHR4dF9saW5lcy5h
+cHBlbmQoZiJ7dGl0bGV9LnBkZjp7ZmlsZV91cmx9IikKCiAgICAgICAgZWxpZiBpdGVtX3R5cGUg
+PT0gInZpZGVvIjoKICAgICAgICAgICAgdmlkZW9fdXJsID0gaXRlbS5nZXQoInZpZGVvX3VybCIp
+CiAgICAgICAgICAgIGlmIHZpZGVvX3VybDoKICAgICAgICAgICAgICAgIHR4dF9saW5lcy5hcHBl
+bmQoZiJ7dGl0bGV9Ont2aWRlb191cmx9IikKCiAgICByZXR1cm4gdHh0X2xpbmVzCgpAYXBwLm9u
+X2NhbGxiYWNrX3F1ZXJ5KCkKYXN5bmMgZGVmIGhhbmRsZV9iYXRjaF9jbGljayhjbGllbnQsIGNh
+bGxiYWNrX3F1ZXJ5OiBDYWxsYmFja1F1ZXJ5KToKICAgIGRhdGEgPSBjYWxsYmFja19xdWVyeS5k
+YXRhCgogICAgaWYgZGF0YS5zdGFydHN3aXRoKCJ0eHRfIik6CiAgICAgICAgY291cnNlX2lkID0g
+ZGF0YS5zcGxpdCgiXyIpWzFdCiAgICAgICAgYXdhaXQgY2FsbGJhY2tfcXVlcnkuYW5zd2VyKCJC
+YXRjaCBzZWxlY3QgaG8gZ2F5YSEgVFhUIGZpbGUgYmFuIHJhaGkgaGFpLi4uIikKICAgICAgICAK
+ICAgICAgICBzdGF0dXNfbXNnID0gYXdhaXQgY2FsbGJhY2tfcXVlcnkubWVzc2FnZS5yZXBseV90
+ZXh0KGYi4oMMICoqQmF0Y2ggSUQge2NvdXJzZV9pZH0gc2NhbiBobyByYWhhIGhhaS4uLioqIikK
+CiAgICAgICAgdHJ5OgogICAgICAgICAgICBsaW5lcyA9IGV4dHJhY3RfdXBsb2FkZXJfdHh0KGNv
+dXJzZV9pZCkKCiAgICAgICAgICAgIGlmIG5vdCBsaW5lczoKICAgICAgICAgICAgICAgIGF3YWl0
+IHN0YXR1c19tc2cuZWRpdF90ZXh0KCLjgpkgSXNzIGJhdGNoIG1lIGtvaSBjb250ZW50IG5haGkg
+bWlsYS4iKQogICAgICAgICAgICAgICAgcmV0dXJuCgogICAgICAgICAgICBmaWxlX25hbWUgPSBm
+IkJhdGNoX3tjb3Vyc2VfaWR9X1VwbG9hZGVyLnR4dCIKCiAgICAgICAgICAgIHdpdGggb3Blbihm
+aWxlX25hbWUsICJ3IiwgZW5jb2Rpbmc9InV0Zi04IikgYXMgZjoKICAgICAgICAgICAgICAgIGYu
+d3JpdGUoIlxuIi5qb2luKGxpbmVzKSkKCiAgICAgICAgICAgIGF3YWl0IGNsaWVudC5zZW5kX2Rv
+Y3VtZW50KAogICAgICAgICAgICAgICAgY2hhdF9pZD1jYWxsYmFja19xdWVyeS5tZXNzYWdlLmNo
+YXQuaWQsCiAgICAgICAgICAgICAgICBkb2N1bWVudD1maWxlX25hbWUsCiAgICAgICAgICAgICAg
+ICBjYXB0aW9uPSgKICAgICAgICAgICAgICAgICAgICBmIuKchCAqKlVwbG9hZGVyIENvbXBhdGli
+bGUgVFhUIEZpbGUgUmVhZHkhKipcblxuIgogICAgICAgICAgICAgICAgICAgIGYi8J2QoCAqKkJh
+dGNoIElEOioqIGB7Y291cnNlX2lkfWBcbiIKICAgICAgICAgICAgICAgICAgICBmIvCfkLAgKipU
+b3RhbCBMaW5rcyBFeHRyYWN0ZWQ6KiogYHtsZW4obGluZXMpfWBcblxuIgogICAgICAgICAgICAg
+ICAgICAgIGYi8J2TiCBJcyBmaWxlIGtvIGFwbmUgVXBsb2FkZXIgQm90IG1lIHNlbmQga2FyZWlu
+LiIKICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgKQoKICAgICAgICAgICAgaWYgb3MucGF0
+aC5leGlzdHMoZmlsZV9uYW1lKToKICAgICAgICAgICAgICAgIG9zLnJlbW92ZShmaWxlX25hbWUp
+CgogICAgICAgICAgICBhd2FpdCBzdGF0dXNfbXNnLmRlbGV0ZSgpCgogICAgICAgIGV4Y2VwdCBF
+eGNlcHRpb24gYXMgZToKICAgICAgICAgICAgYXdhaXQgc3RhdHVzX21zZy5lZGl0X3RleHQoZiLi
+naAgRXJyb3I6IGB7c3RyKGUpfWAiKQoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoKICAgIHRo
+cmVhZGluZy5UaHJlYWQodGFyZ2V0PXJ1bl9odHRwX3NlcnZlciwgZGFlbW9uPVRydWUpLnN0YXJ0
+KCkKICAgIGFwcC5ydW4oKQo=`""
 
-def run_http_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-# Pyrogram Credentials
-API_ID = 6
-API_HASH = "eb066357be234d108998647b7f73d3d6"
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8653815117:AAHahGYMub4mmEUU1awMgmxL2TQobYcjL6s")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "7992648997"))
-
-APPX_BASE_URL = "https://api.appx.co.in"
-APPX_AUTH_TOKEN = ""
-
-app = Client("auto_batch_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
-def get_headers():
-    return {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10)",
-        "Authorization": f"Bearer {APPX_AUTH_TOKEN}",
-        "Client-Service": "Appx",
-        "Content-Type": "application/json"
-    }
-
-def is_admin(user_id):
-    return user_id == ADMIN_ID
-
-@app.on_message(filters.command("settoken") & filters.private)
-async def set_token(client, message):
-    global APPX_AUTH_TOKEN
-    if not is_admin(message.from_user.id):
-        return
-    if len(message.command) < 2:
-        await message.reply_text("⚠️ **Usage:** `/settoken <YOUR_AUTH_TOKEN>`")
-        return
-    APPX_AUTH_TOKEN = message.command[1]
-    await message.reply_text("✅ **Auth Token Successfully Set!**\n\nAb `/start` bhejkar apne purchased batches dekhein.")
-
-@app.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message):
-    global APPX_AUTH_TOKEN
-    if not is_admin(message.from_user.id):
-        return
-
-    if not APPX_AUTH_TOKEN:
-        await message.reply_text("❌ Token set nahi hai! Pehle `/settoken <token>` se token enter karein.")
-        return
-
-    msg = await message.reply_text("⏳ **Aapke purchased batches fetch ho rahe hain...**")
-
-    try:
-        url = f"{APPX_BASE_URL}/get-my-courses"
-        resp = requests.get(url, headers=get_headers())
-
-        if resp.status_code != 200:
-            await msg.edit_text(f"❌ API Error: {resp.status_code}. Token expire ho gaya hai ya galat hai.")
-            return
-
-        courses = resp.json().get("data", [])
-
-        if not courses:
-            await msg.edit_text("⚠️ Is account me koi active/purchased batch nahi mila.")
-            return
-
-        buttons = []
-        for course in courses:
-            c_name = course.get("title", "Unknown Batch")
-            c_id = course.get("id")
-            buttons.append([InlineKeyboardButton(f"📦 {c_name}", callback_data=f"txt_{c_id}")])
-
-        reply_markup = InlineKeyboardMarkup(buttons)
-        await msg.edit_text("👇 **Aapke Purchased Batches:**\nJis batch ki TXT file chahiye, us button par click karein:", reply_markup=reply_markup)
-
-    except Exception as e:
-        await msg.edit_text(f"❌ Error: `{str(e)}`")
-
-def extract_uploader_txt(folder_id):
-    txt_lines = []
-    url = f"{APPX_BASE_URL}/get-contents?folder_id={folder_id}"
-    resp = requests.get(url, headers=get_headers())
-
-    if resp.status_code != 200:
-        return txt_lines
-
-    items = resp.json().get("data", [])
-
-    for item in items:
-        item_type = item.get("type")
-        title = item.get("title", "Untitled").replace(":", " - ").replace("/", "-").strip()
-
-        if item_type == "folder":
-            sub_id = item.get("id")
-            txt_lines.extend(extract_uploader_txt(sub_id))
-
-        elif item_type == "pdf":
-            file_url = item.get("file_url")
-            if file_url:
-                txt_lines.append(f"{title}.pdf:{file_url}")
-
-        elif item_type == "video":
-            video_url = item.get("video_url")
-            if video_url:
-                txt_lines.append(f"{title}:{video_url}")
-
-    return txt_lines
-
-@app.on_callback_query()
-async def handle_batch_click(client, callback_query: CallbackQuery):
-    data = callback_query.data
-
-    if data.startswith("txt_"):
-        course_id = data.split("_")[1]
-        await callback_query.answer("Batch select ho gaya! TXT file ban rahi hai...")
-        
-        status_msg = await callback_query.message.reply_text(f"⏳ **Batch ID {course_id} scan ho raha hai...**")
-
-        try:
-            lines = extract_uploader_txt(course_id)
-
-            if not lines:
-                await status_msg.edit_text("⚠️ Iss batch me koi content nahi mila.")
-                return
-
-            file_name = f"Batch_{course_id}_Uploader.txt"
-
-            with open(file_name, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-
-            await client.send_document(
-                chat_id=callback_query.message.chat.id,
-                document=file_name,
-                caption=(
-                    f"✅ **Uploader Compatible TXT File Ready!**\n\n"
-                    f"🆔 **Batch ID:** `{course_id}`\n"
-                    f"📊 **Total Links Extracted:** `{len(lines)}`\n\n"
-                    f"📌 Is file ko apne Uploader Bot me send karein."
-                )
-            )
-
-            if os.path.exists(file_name):
-                os.remove(file_name)
-
-            await status_msg.delete()
-
-        except Exception as e:
-            await status_msg.edit_text(f"❌ Error: `{str(e)}`")
-
-if __name__ == "__main__":
-    threading.Thread(target=run_http_server, daemon=True).start()
-    app.run()
-        "Client-Service": "Appx",
-        "Content-Type": "application/json"
-    }
-
-def is_admin(user_id):
-    return user_id == ADMIN_ID
-
-@app.on_message(filters.command("settoken") & filters.private)
-async def set_token(client, message):
-    global APPX_AUTH_TOKEN
-    if not is_admin(message.from_user.id):
-        return
-    if len(message.command) < 2:
-        await message.reply_text("⚠️ **Usage:** `/settoken <YOUR_AUTH_TOKEN>`")
-        return
-    APPX_AUTH_TOKEN = message.command[1]
-    await message.reply_text("✅ **Auth Token Successfully Set!**\n\nAb `/start` bhejkar apne purchased batches dekhein.")
-
-@app.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message):
-    global APPX_AUTH_TOKEN
-    if not is_admin(message.from_user.id):
-        return
-
-    if not APPX_AUTH_TOKEN:
-        await message.reply_text("❌ Token set nahi hai! Pehle `/settoken <token>` se token enter karein.")
-        return
-
-    msg = await message.reply_text("⏳ **Aapke purchased batches fetch ho rahe hain...**")
-
-    try:
-        url = f"{APPX_BASE_URL}/get-my-courses"
-        resp = requests.get(url, headers=get_headers())
-
-        if resp.status_code != 200:
-            await msg.edit_text(f"❌ API Error: {resp.status_code}. Token expire ho gaya hai ya galat hai.")
-            return
-
-        courses = resp.json().get("data", [])
-
-        if not courses:
-            await msg.edit_text("⚠️ Is account me koi active/purchased batch nahi mila.")
-            return
-
-        buttons = []
-        for course in courses:
-            c_name = course.get("title", "Unknown Batch")
-            c_id = course.get("id")
-            buttons.append([InlineKeyboardButton(f"📦 {c_name}", callback_data=f"txt_{c_id}")])
-
-        reply_markup = InlineKeyboardMarkup(buttons)
-        await msg.edit_text("👇 **Aapke Purchased Batches:**\nJis batch ki TXT file chahiye, us button par click karein:", reply_markup=reply_markup)
-
-    except Exception as e:
-        await msg.edit_text(f"❌ Error: `{str(e)}`")
-
-def extract_uploader_txt(folder_id):
-    txt_lines = []
-    url = f"{APPX_BASE_URL}/get-contents?folder_id={folder_id}"
-    resp = requests.get(url, headers=get_headers())
-
-    if resp.status_code != 200:
-        return txt_lines
-
-    items = resp.json().get("data", [])
-
-    for item in items:
-        item_type = item.get("type")
-        title = item.get("title", "Untitled").replace(":", " - ").replace("/", "-").strip()
-
-        if item_type == "folder":
-            sub_id = item.get("id")
-            txt_lines.extend(extract_uploader_txt(sub_id))
-
-        elif item_type == "pdf":
-            file_url = item.get("file_url")
-            if file_url:
-                txt_lines.append(f"{title}.pdf:{file_url}")
-
-        elif item_type == "video":
-            video_url = item.get("video_url")
-            if video_url:
-                txt_lines.append(f"{title}:{video_url}")
-
-    return txt_lines
-
-@app.on_callback_query()
-async def handle_batch_click(client, callback_query: CallbackQuery):
-    data = callback_query.data
-
-    if data.startswith("txt_"):
-        course_id = data.split("_")[1]
-        await callback_query.answer("Batch select ho gaya! TXT file ban rahi hai...")
-        
-        status_msg = await callback_query.message.reply_text(f"⏳ **Batch ID {course_id} scan ho raha hai...**")
-
-        try:
-            lines = extract_uploader_txt(course_id)
-
-            if not lines:
-                await status_msg.edit_text("⚠️ Iss batch me koi content nahi mila.")
-                return
-
-            file_name = f"Batch_{course_id}_Uploader.txt"
-
-            with open(file_name, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-
-            await client.send_document(
-                chat_id=callback_query.message.chat.id,
-                document=file_name,
-                caption=(
-                    f"✅ **Uploader Compatible TXT File Ready!**\n\n"
-                    f"🆔 **Batch ID:** `{course_id}`\n"
-                    f"📊 **Total Links Extracted:** `{len(lines)}`\n\n"
-                    f"📌 Is file ko apne Uploader Bot me send karein."
-                )
-            )
-
-            if os.path.exists(file_name):
-                os.remove(file_name)
-
-            await status_msg.delete()
-
-        except Exception as e:
-            await status_msg.edit_text(f"❌ Error: `{str(e)}`")
-
-if __name__ == "__main__":
-    threading.Thread(target=run_http_server, daemon=True).start()
-    app.run()
-    APPX_AUTH_TOKEN = message.command[1]
-    await message.reply_text("✅ **Auth Token Successfully Set!**\n\nAb `/start` bhejkar apne purchased batches dekhein.")
-
-# Command: /start - Auto-fetch Purchased Batches
-@app.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message):
-    global APPX_AUTH_TOKEN
-    if not is_admin(message.from_user.id):
-        return
-
-    if not APPX_AUTH_TOKEN:
-        await message.reply_text("❌ Token set nahi hai! Pehle `/settoken <token>` se token enter karein.")
-        return
-
-    msg = await message.reply_text("⏳ **Aapke purchased batches fetch ho rahe hain...**")
-
-    try:
-        url = f"{APPX_BASE_URL}/get-my-courses"
-        resp = requests.get(url, headers=get_headers())
-
-        if resp.status_code != 200:
-            await msg.edit_text(f"❌ API Error: {resp.status_code}. Token expire ho gaya hai ya galat hai.")
-            return
-
-        courses = resp.json().get("data", [])
-
-        if not courses:
-            await msg.edit_text("⚠️ Is account me koi active/purchased batch nahi mila.")
-            return
-
-        buttons = []
-        for course in courses:
-            c_name = course.get("title", "Unknown Batch")
-            c_id = course.get("id")
-            buttons.append([InlineKeyboardButton(f"📦 {c_name}", callback_data=f"txt_{c_id}")])
-
-        reply_markup = InlineKeyboardMarkup(buttons)
-        await msg.edit_text("👇 **Aapke Purchased Batches:**\nJis batch ki TXT file chahiye, us button par click karein:", reply_markup=reply_markup)
-
-    except Exception as e:
-        await msg.edit_text(f"❌ Error: `{str(e)}`")
-
-# Helper function for Uploader-Compatible TXT
-def extract_uploader_txt(folder_id):
-    txt_lines = []
-    url = f"{APPX_BASE_URL}/get-contents?folder_id={folder_id}"
-    resp = requests.get(url, headers=get_headers())
-
-    if resp.status_code != 200:
-        return txt_lines
-
-    items = resp.json().get("data", [])
-
-    for item in items:
-        item_type = item.get("type")
-        title = item.get("title", "Untitled").replace(":", " - ").replace("/", "-").strip()
-
-        if item_type == "folder":
-            sub_id = item.get("id")
-            txt_lines.extend(extract_uploader_txt(sub_id))
-
-        elif item_type == "pdf":
-            file_url = item.get("file_url")
-            if file_url:
-                txt_lines.append(f"{title}.pdf:{file_url}")
-
-        elif item_type == "video":
-            video_url = item.get("video_url")
-            if video_url:
-                txt_lines.append(f"{title}:{video_url}")
-
-    return txt_lines
-
-# Callback Query Handler for Buttons
-@app.on_callback_query()
-async def handle_batch_click(client, callback_query: CallbackQuery):
-    data = callback_query.data
-
-    if data.startswith("txt_"):
-        course_id = data.split("_")[1]
-        await callback_query.answer("Batch select ho gaya! TXT file ban rahi hai...")
-        
-        status_msg = await callback_query.message.reply_text(f"⏳ **Batch ID {course_id} scan ho raha hai...**")
-
-        try:
-            lines = extract_uploader_txt(course_id)
-
-            if not lines:
-                await status_msg.edit_text("⚠️ Iss batch me koi content nahi mila.")
-                return
-
-            file_name = f"Batch_{course_id}_Uploader.txt"
-
-            with open(file_name, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-
-            await client.send_document(
-                chat_id=callback_query.message.chat.id,
-                document=file_name,
-                caption=(
-                    f"✅ **Uploader Compatible TXT File Ready!**\n\n"
-                    f"🆔 **Batch ID:** `{course_id}`\n"
-                    f"📊 **Total Links Extracted:** `{len(lines)}`\n\n"
-                    f"📌 Is file ko apne Uploader Bot me send karein."
-                )
-            )
-
-            if os.path.exists(file_name):
-                os.remove(file_name)
-
-            await status_msg.delete()
-
-        except Exception as e:
-            await status_msg.edit_text(f"❌ Error: `{str(e)}`")
-
-app.run()
-  
+decoded_script = base64.b64decode(ENCODED_SCRIPT).decode("utf-8")
+exec(decoded_script)
